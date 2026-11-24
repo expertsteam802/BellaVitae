@@ -62,6 +62,17 @@ function PatientPortalPage() {
       return data ?? [];
     },
   });
+  const payments = useQuery({
+    enabled: !!user,
+    queryKey: ["portal-payments", user?.id],
+    queryFn: async () => {
+      const { data, error } = await db.from("invoice_payments")
+        .select("id, amount, payment_method, reference, received_at")
+        .eq("patient_id", user!.id).order("received_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
   const invoices = useQuery({
     enabled: !!user,
     queryKey: ["portal-invoices", user?.id],
@@ -85,8 +96,8 @@ function PatientPortalPage() {
     </SiteLayout>
   );
 
-  const busy = [appointments, summaries, prescriptions, results, invoices].some((q) => q.isLoading);
-  const error = [appointments, summaries, prescriptions, results, invoices].find((q) => q.error)?.error;
+  const busy = [appointments, summaries, prescriptions, results, invoices, payments].some((q) => q.isLoading);
+  const error = [appointments, summaries, prescriptions, results, invoices, payments].find((q) => q.error)?.error;
 
   return (
     <SiteLayout>
@@ -183,6 +194,15 @@ function PatientPortalPage() {
               </tbody>
             </table>
             {(invoices.data ?? []).length === 0 ? <p className="p-4 text-sm text-muted-foreground">No invoices are available.</p> : null}
+          </div>
+        </section>
+        <section className="mt-10">
+          <SectionTitle title="Payment history" subtitle="Receipts recorded by the clinic. This portal does not process payments." />
+          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full text-sm"><thead className="bg-secondary/60 text-left"><tr>{["Date","Amount","Method","Reference"].map((h) => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead><tbody>
+              {(payments.data ?? []).map((p: any) => <tr key={p.id} className="border-t border-border"><td className="px-4 py-3">{new Date(p.received_at).toLocaleString()}</td><td className="px-4 py-3 tabular-nums">{Number(p.amount).toLocaleString()} RWF</td><td className="px-4 py-3 capitalize">{p.payment_method.replaceAll("_", " ")}</td><td className="px-4 py-3">{p.reference ?? "—"}</td></tr>)}
+            </tbody></table>
+            {(payments.data ?? []).length === 0 ? <p className="p-4 text-sm text-muted-foreground">No payment receipts are available.</p> : null}
           </div>
         </section>
         <p className="mt-10 rounded-xl bg-secondary/60 p-4 text-xs text-muted-foreground">This portal displays information entered and released by Bella Vitae staff. It is not an emergency service. For urgent concerns, contact the clinic directly.</p>
