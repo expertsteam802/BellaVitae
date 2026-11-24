@@ -1,0 +1,70 @@
+name: Unpack Bella Vitae source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/unpack-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Extract archive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import shutil
+
+          archive = Path("bellavitaemedicalclinic-main.zip")
+          if not archive.exists():
+              raise SystemExit("Archive not found")
+          temp = Path("_unpack_tmp")
+          shutil.rmtree(temp, ignore_errors=True)
+          temp.mkdir()
+          with ZipFile(archive) as z:
+              for info in z.infolist():
+                  name = info.filename.replace("\\", "/")
+                  parts = [p for p in name.split("/") if p not in ("", ".")]
+                  if not parts or ".." in parts:
+                      continue
+                  if any(p.lower() == ".env" or p.lower().startswith(".env.") for p in parts):
+                      continue
+                  if any(p in (".git", "node_modules") for p in parts):
+                      continue
+                  relative = parts[1:] if len(parts) > 1 else parts
+                  if not relative:
+                      continue
+                  target = temp.joinpath(*relative)
+                  if info.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                  else:
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with z.open(info) as src, target.open("wb") as dst:
+                          shutil.copyfileobj(src, dst)
+          for item in temp.iterdir():
+              if item.name == "README.md" and Path("README.md").exists():
+                  continue
+              dest = Path(item.name)
+              if dest.exists():
+                  shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
+              shutil.move(str(item), str(dest))
+          shutil.rmtree(temp)
+          archive.unlink()
+          PY
+      - name: Commit extracted files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Extract Bella Vitae clinic source files"
+          git push origin main
