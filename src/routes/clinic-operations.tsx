@@ -32,6 +32,7 @@ function ClinicOperationsPage() {
   const [lab, setLab] = useState({ testName: "", priority: "routine", notes: "" });
   const [result, setResult] = useState({ orderId: "", summary: "", value: "", unit: "", range: "", interpretation: "" });
   const [invoice, setInvoice] = useState({ description: "", amount: "", dueDate: "", discount: "0" });
+  const [payment, setPayment] = useState({ invoiceId: "", amount: "", method: "cash", reference: "" });
   const [busy, setBusy] = useState(false);
 
   const permissionsQuery = useQuery({
@@ -106,6 +107,15 @@ function ClinicOperationsPage() {
     queryKey: ["clinic-invoices"],
     queryFn: async () => {
       const { data, error } = await db.from("invoices").select("*").order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const paymentsQuery = useQuery({
+    enabled: !!user && isStaff && can("billing.read"),
+    queryKey: ["clinic-invoice-payments"],
+    queryFn: async () => {
+      const { data, error } = await db.from("invoice_payments").select("*").order("received_at", { ascending: false }).limit(100);
       if (error) throw error;
       return data ?? [];
     },
@@ -360,10 +370,28 @@ function ClinicOperationsPage() {
             <div className="overflow-x-auto rounded-xl border border-border bg-card">
               <h2 className="p-4 text-lg font-semibold">Invoices</h2>
               <table className="w-full text-sm"><thead className="bg-secondary/60 text-left"><tr>{["Invoice","Patient ID","Total","Due","Status","Update"].map((h) => <th key={h} className="px-3 py-2">{h}</th>)}</tr></thead><tbody>
-                {(invoicesQuery.data ?? []).map((i: any) => <tr key={i.id} className="border-t border-border"><td className="px-3 py-2 font-mono">{i.invoice_number}</td><td className="px-3 py-2 font-mono text-xs">{i.patient_id.slice(0,8)}…</td><td className="px-3 py-2 tabular-nums">{Number(i.total).toLocaleString()} RWF</td><td className="px-3 py-2">{i.due_date ?? "—"}</td><td className="px-3 py-2 capitalize">{i.status}</td><td className="px-3 py-2">{can("billing.write") ? <select value={i.status} onChange={(e) => void submit(async () => { const { error } = await db.from("invoices").update({ status: e.target.value }).eq("id", i.id); if (error) throw error; refresh("clinic-invoices"); })} className="rounded-md border border-input bg-background px-2 py-1 text-xs">{["draft","issued","partial","paid","void"].map((s) => <option key={s}>{s}</option>)}</select> : "—"}</td></tr>)}
+                {(invoicesQuery.data ?? []).map((i: any) => <tr key={i.id} className="border-t border-border"><td className="px-3 py-2 font-mono">{i.invoice_number}</td><td className="px-3 py-2 font-mono text-xs">{i.patient_id.slice(0,8)}…</td><td className="px-3 py-2 tabular-nums">{Number(i.total).toLocaleString()} RWF</td><td className="px-3 py-2">{i.due_date ?? "—"}</td><td className="px-3 py-2 capitalize">{i.status}</td><td className="px-3 py-2">{can("billing.write") ? <select value={i.status} disabled={i.status === "partial" || i.status === "paid"} onChange={(e) => void submit(async () => { const { error } = await db.from("invoices").update({ status: e.target.value }).eq("id", i.id); if (error) throw error; refresh("clinic-invoices"); })} className="rounded-md border border-input bg-background px-2 py-1 text-xs">{["draft","issued","void"].map((s) => <option key={s}>{s}</option>)}</select> : "—"}</td></tr>)}
               </tbody></table>
               {(invoicesQuery.data ?? []).length === 0 ? <p className="p-4 text-sm text-muted-foreground">No invoices yet.</p> : null}
             </div>
+            {can("billing.write") ? <form className="max-w-2xl space-y-3 rounded-xl border border-border bg-card p-5" onSubmit={(e) => { e.preventDefault(); void submit(async () => {
+              const selected = (invoicesQuery.data ?? []).find((item: any) => item.id === payment.invoiceId);
+              const amount = Number(payment.amount);
+              if (!selected || !["issued","partial"].includes(selected.status)) throw new Error("Choose an issued invoice with an outstanding balance");
+              if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid payment amount in RWF");
+              const { error } = await db.from("invoice_payments").insert({ invoice_id: selected.id, patient_id: selected.patient_id, amount, payment_method: payment.method, reference: payment.reference.trim() || null, received_by: user!.id });
+              if (error) throw error;
+              setPayment({ invoiceId: "", amount: "", method: "cash", reference: "" }); toast.success("Payment recorded; invoice balance and status updated"); refresh("clinic-invoices","clinic-invoice-payments");
+            }); }}>
+              <h2 className="text-lg font-semibold">Record a received payment</h2>
+              <SelectField label="Issued invoice" value={payment.invoiceId} onChange={(v) => setPayment({ ...payment, invoiceId: v })} options={(invoicesQuery.data ?? []).filter((i: any) => ["issued","partial"].includes(i.status)).map((i: any) => ({ value: i.id, label: i.invoice_number + " · " + Number(i.total).toLocaleString() + " RWF" }))} />
+              <Field label="Amount received (RWF)" type="number" value={payment.amount} onChange={(v) => setPayment({ ...payment, amount: v })} />
+              <SelectField label="Payment method" value={payment.method} onChange={(v) => setPayment({ ...payment, method: v })} options={["cash","mobile_money","bank_transfer","card","insurance","other"]} />
+              <Field label="Receipt / transaction reference (optional)" value={payment.reference} onChange={(v) => setPayment({ ...payment, reference: v })} />
+              <p className="text-xs text-muted-foreground">This records a payment already received by the clinic; it does not charge a card or initiate a mobile-money transfer.</p>
+              <Submit busy={busy}>Record payment</Submit>
+            </form> : null}
+            {can("billing.read") ? <div className="rounded-xl border border-border bg-card p-4"><h2 className="font-semibold">Recent payments</h2><div className="mt-3 space-y-2">{(paymentsQuery.data ?? []).map((p: any) => <div key={p.id} className="flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-sm"><span>{Number(p.amount).toLocaleString()} RWF · {p.payment_method} · {p.reference || "No reference"}</span><span className="text-xs text-muted-foreground">{new Date(p.received_at).toLocaleString()}</span></div>)}{(paymentsQuery.data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No payments recorded.</p> : null}</div></div> : null}
             {can("claims.read") ? <div className="rounded-xl border border-border bg-card p-4"><h2 className="font-semibold">Insurance claims</h2><div className="mt-3 space-y-2">{(claimsQuery.data ?? []).map((c: any) => <div key={c.id} className="flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-sm"><span>{c.insurer_name} · {c.claim_number || "No claim number"} · {Number(c.amount).toLocaleString()} RWF</span><span className="capitalize">{c.status}</span></div>)}{(claimsQuery.data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No claims recorded.</p> : null}</div></div> : null}
           </section>
         ) : null}
