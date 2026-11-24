@@ -26,7 +26,7 @@ export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-const TABS = ["Appointments", "Messages", "Contacts", "Insurances", "Workers", "News", "Team", "Administrators", "Settings"] as const;
+const TABS = ["Appointments", "Messages", "Contacts", "Insurances", "Workers", "News", "Team", "Administrators", "Access", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 function AdminPage() {
@@ -85,6 +85,7 @@ function AdminPage() {
           {tab === "News" ? <NewsTab /> : null}
           {tab === "Team" && isAdmin ? <TeamTab /> : null}
           {tab === "Administrators" && isAdmin ? <AdministratorsTab /> : null}
+          {tab === "Access" && isAdmin ? <StaffAccessTab /> : null}
           {tab === "Settings" && isAdmin ? <SettingsTab /> : null}
         </div>
       </div>
@@ -815,6 +816,99 @@ function SettingsTab() {
   );
 }
 
+
+
+function StaffAccessTab() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const db = supabase as any;
+  const [busyUser, setBusyUser] = useState<string | null>(null);
+  const permissionOptions = [
+    ["patients.read", "Patient directory"],
+    ["records.read", "Read medical records"],
+    ["records.write", "Write medical records"],
+    ["encounters.read", "Read consultations"],
+    ["encounters.write", "Create consultations and visit summaries"],
+    ["prescriptions.read", "Read prescriptions"],
+    ["prescriptions.write", "Create prescriptions"],
+    ["lab.read", "Read laboratory work"],
+    ["lab.write", "Manage laboratory work and verify results"],
+    ["billing.read", "Read invoices"],
+    ["billing.write", "Create and update invoices"],
+    ["claims.read", "Read insurance claims"],
+    ["claims.write", "Manage insurance claims"],
+    ["documents.read", "Read patient document metadata"],
+    ["documents.write", "Register patient documents"],
+    ["audit.read", "Review audit activity"],
+  ] as const;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["clinic_staff_access"],
+    queryFn: async () => {
+      const { data: roles, error: roleError } = await supabase.from("user_roles").select("user_id").eq("role", "staff");
+      if (roleError) throw roleError;
+      const ids = [...new Set((roles ?? []).map((r) => r.user_id))];
+      if (!ids.length) return [];
+      const [{ data: profiles, error: profileError }, { data: grants, error: grantsError }] = await Promise.all([
+        supabase.from("profiles").select("id, full_name, email, specialty").in("id", ids),
+        db.from("staff_permissions").select("user_id, permission").in("user_id", ids),
+      ]);
+      if (profileError) throw profileError;
+      if (grantsError) throw grantsError;
+      return (profiles ?? []).map((profile) => ({
+        ...profile,
+        permissions: (grants ?? []).filter((grant: { user_id: string }) => grant.user_id === profile.id).map((grant: { permission: string }) => grant.permission),
+      })).sort((a, b) => (a.full_name ?? a.email ?? "").localeCompare(b.full_name ?? b.email ?? ""));
+    },
+  });
+
+  const toggle = async (staffId: string, permission: string, enabled: boolean) => {
+    setBusyUser(staffId);
+    try {
+      const result = enabled
+        ? await db.from("staff_permissions").insert({ user_id: staffId, permission, granted_by: user?.id })
+        : await db.from("staff_permissions").delete().eq("user_id", staffId).eq("permission", permission);
+      if (result.error) throw result.error;
+      toast.success(enabled ? "Permission granted" : "Permission removed");
+      qc.invalidateQueries({ queryKey: ["clinic_staff_access"] });
+      qc.invalidateQueries({ queryKey: ["my-clinic-permissions"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update staff permissions");
+    } finally {
+      setBusyUser(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-4">
+        <h2 className="font-semibold">Staff access control</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Grant only the permissions required for each person's job. Administrators retain full access. Staff receive no clinical or billing permissions by default.</p>
+      </div>
+      {isLoading ? <p className="text-sm text-muted-foreground">Loading staff accounts…</p> : null}
+      {(data ?? []).map((staff) => (
+        <details key={staff.id} className="rounded-xl border border-border bg-card p-4">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+            <span><strong>{staff.full_name || staff.email || "Staff account"}</strong><span className="ml-2 text-sm text-muted-foreground">{staff.specialty || ""}</span><span className="mt-1 block text-xs text-muted-foreground">{staff.email}</span></span>
+            <span className="rounded-full bg-secondary px-3 py-1 text-xs">{staff.permissions.length} permissions</span>
+          </summary>
+          <div className="mt-4 grid gap-2 border-t border-border pt-4 sm:grid-cols-2">
+            {permissionOptions.map(([permission, label]) => {
+              const checked = staff.permissions.includes(permission);
+              return (
+                <label key={permission} className="flex items-start gap-2 rounded-md p-2 text-sm hover:bg-secondary/60">
+                  <input type="checkbox" checked={checked} disabled={busyUser === staff.id} onChange={(e) => void toggle(staff.id, permission, e.target.checked)} className="mt-0.5" />
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      ))}
+      {!isLoading && (data ?? []).length === 0 ? <p className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">No staff accounts found. Register staff members in the Workers tab first.</p> : null}
+    </div>
+  );
+}
 
 function AdministratorsTab() {
   const fetchAdmins = useServerFn(listAdministrators);
