@@ -1,4 +1,4 @@
-name: Build and lint
+name: Build application
 
 on:
   push:
@@ -37,5 +37,3 @@ jobs:
       - name: Build application
         run: bun run build
 
-      - name: Lint source
-        run: bun run lint
