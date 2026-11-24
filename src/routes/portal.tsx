@@ -91,7 +91,7 @@ function PatientPortalPage() {
       <div className="mx-auto max-w-xl px-4 py-20 text-center">
         <h1 className="text-3xl font-bold text-primary">Your patient portal</h1>
         <p className="mt-3 text-muted-foreground">Sign in to view information that the clinic has securely linked to your account.</p>
-        <Link to="/auth" className="mt-6 inline-flex rounded-md bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground">Sign in</Link>
+        <Link to="/patient-access" className="mt-6 inline-flex rounded-md bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground">Sign in</Link>
       </div>
     </SiteLayout>
   );
