@@ -10,6 +10,7 @@ const navLinks = [
   { to: "/", label: "Home" },
   { to: "/appointments", label: "Appointments" },
   { to: "/my-appointments", label: "My appointments" },
+  { to: "/patient-access", label: "Patient access" },
   { to: "/news", label: "News" },
   { to: "/community", label: "Community" },
 ];
