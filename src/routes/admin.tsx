@@ -1,0 +1,841 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
+import { toast } from "sonner";
+import { SiteLayout } from "@/components/SiteLayout";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { createWorker } from "@/lib/admin.functions";
+import { listWorkers, deleteWorker } from "@/lib/staff.functions";
+import { sendTestNotification } from "@/lib/status.functions";
+
+export const Route = createFileRoute("/admin")({
+  head: () => ({
+    meta: [
+      { title: "Admin panel | Bella Vitae Medical Clinic" },
+      {
+        name: "description",
+        content: "Manage contacts, staff accounts, appointments and news for Bella Vitae Medical Clinic.",
+      },
+      { property: "og:title", content: "Admin panel | Bella Vitae Medical Clinic" },
+      { property: "og:description", content: "Internal management area for clinic administrators." },
+    ],
+  }),
+  component: AdminPage,
+});
+
+const TABS = ["Appointments", "Messages", "Contacts", "Insurances", "Workers", "News", "Team", "Settings"] as const;
+type Tab = (typeof TABS)[number];
+
+function AdminPage() {
+  const { loading, isAdmin, isStaff } = useAuth();
+  const [tab, setTab] = useState<Tab>("Appointments");
+
+  if (loading) {
+    return (
+      <SiteLayout>
+        <p className="mx-auto max-w-6xl px-4 py-16 text-muted-foreground">Loading…</p>
+      </SiteLayout>
+    );
+  }
+
+  if (!isStaff) {
+    return (
+      <SiteLayout>
+        <div className="mx-auto max-w-md px-4 py-20 text-center">
+          <h1 className="text-2xl font-bold text-primary">Restricted area</h1>
+          <p className="mt-2 text-muted-foreground">
+            This panel is reserved for clinic staff and administrators.
+          </p>
+          <Link to="/auth" className="mt-4 inline-block text-primary hover:underline">
+            Sign in
+          </Link>
+        </div>
+      </SiteLayout>
+    );
+  }
+
+  const visibleTabs = isAdmin ? TABS : (["Appointments", "Messages", "News"] as const);
+
+  return (
+    <SiteLayout>
+      <div className="mx-auto max-w-6xl px-4 py-10">
+        <h1 className="text-3xl font-bold text-primary">{isAdmin ? "Admin panel" : "Staff panel"}</h1>
+        <div className="mt-6 flex flex-wrap gap-2 border-b border-border">
+          {visibleTabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`rounded-t-md px-4 py-2 text-sm font-medium ${
+                tab === t ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <div className="py-8">
+          {tab === "Appointments" ? <AppointmentsTab /> : null}
+          {tab === "Messages" ? <MessagesTab isAdmin={isAdmin} /> : null}
+          {tab === "Contacts" && isAdmin ? <ContactsTab /> : null}
+          {tab === "Insurances" && isAdmin ? <InsurancesTab /> : null}
+          {tab === "Workers" && isAdmin ? <WorkersTab /> : null}
+          {tab === "News" ? <NewsTab /> : null}
+          {tab === "Team" && isAdmin ? <TeamTab /> : null}
+          {tab === "Settings" && isAdmin ? <SettingsTab /> : null}
+        </div>
+      </div>
+    </SiteLayout>
+  );
+}
+
+function AppointmentsTab() {
+  const qc = useQueryClient();
+  const { isAdmin } = useAuth();
+  const { data } = useQuery({
+    queryKey: ["admin_appointments"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("*")
+        .order("requested_date", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const setStatus = async (id: string, status: string) => {
+    const { error } = await supabase.from("appointments").update({ status }).eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["admin_appointments"] });
+  };
+
+  const remove = async (id: string, code: string | null) => {
+    if (!window.confirm(`Delete appointment ${code ?? ""}? This cannot be undone.`)) return;
+    const { error } = await supabase.from("appointments").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Appointment deleted");
+    qc.invalidateQueries({ queryKey: ["admin_appointments"] });
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <table className="w-full text-sm">
+        <thead className="bg-secondary/60 text-left">
+          <tr>
+            {["Code", "Patient", "Phone", "Insurance", "Doctor", "When", "Status", "", ""].map((h, i) => (
+              <th key={`${h}-${i}`} className="px-3 py-2 font-medium">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {(data ?? []).map((a) => (
+            <tr key={a.id} className="border-t border-border">
+              <td className="px-3 py-2 font-mono">{a.code}</td>
+              <td className="px-3 py-2">{a.patient_name}</td>
+              <td className="px-3 py-2">{a.phone}</td>
+              <td className="px-3 py-2">{a.insurance}{a.insurance_card ? ` · ${a.insurance_card}` : ""}</td>
+              <td className="px-3 py-2">{a.doctor}</td>
+              <td className="px-3 py-2">{a.requested_date} {a.requested_time}</td>
+              <td className="px-3 py-2">{a.status}</td>
+              <td className="px-3 py-2">
+                <select
+                  value={a.status}
+                  onChange={(e) => setStatus(a.id, e.target.value)}
+                  className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                >
+                  {["pending", "confirmed", "completed", "cancelled"].map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </td>
+              <td className="px-3 py-2">
+                {isAdmin ? (
+                  <button
+                    onClick={() => remove(a.id, a.code)}
+                    className="text-xs text-destructive hover:underline"
+                  >
+                    Delete
+                  </button>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(data ?? []).length === 0 ? (
+        <p className="p-4 text-muted-foreground">No appointments yet.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function InsurancesTab() {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+
+  const { data } = useQuery({
+    queryKey: ["admin_insurances"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("insurances")
+        .select("*")
+        .order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["admin_insurances"] });
+    qc.invalidateQueries({ queryKey: ["insurances"] });
+  };
+
+  const add = async () => {
+    if (name.trim().length < 2) {
+      toast.error("Enter the insurance name");
+      return;
+    }
+    const { error } = await supabase.from("insurances").insert({
+      name: name.trim().toUpperCase(),
+      sort_order: (data?.length ?? 0) + 1,
+    });
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setName("");
+    toast.success("Insurance added");
+    refresh();
+  };
+
+  const rename = async (id: string, value: string) => {
+    const { error } = await supabase.from("insurances").update({ name: value }).eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Insurance updated");
+    refresh();
+  };
+
+  const toggle = async (id: string, active: boolean) => {
+    const { error } = await supabase.from("insurances").update({ active }).eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    refresh();
+  };
+
+  const remove = async (id: string, label: string) => {
+    if (!window.confirm(`Remove ${label} from the accepted insurances?`)) return;
+    const { error } = await supabase.from("insurances").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    refresh();
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-lg font-semibold">Add an insurance</h2>
+        <p className="text-sm text-muted-foreground">
+          Insurances listed here appear on the homepage and in the booking form.
+        </p>
+        <Field label="Insurance name" value={name} onChange={setName} />
+        <button
+          onClick={add}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+        >
+          Add insurance
+        </button>
+      </div>
+      <div className="space-y-3">
+        {(data ?? []).map((i) => (
+          <InsuranceRow
+            key={i.id}
+            insurance={i}
+            onRename={rename}
+            onToggle={toggle}
+            onRemove={remove}
+          />
+        ))}
+        {(data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No insurances yet.</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function InsuranceRow({
+  insurance,
+  onRename,
+  onToggle,
+  onRemove,
+}: {
+  insurance: { id: string; name: string; active: boolean };
+  onRename: (id: string, value: string) => void;
+  onToggle: (id: string, active: boolean) => void;
+  onRemove: (id: string, label: string) => void;
+}) {
+  const [value, setValue] = useState(insurance.name);
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="min-w-40 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+      />
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={insurance.active}
+          onChange={(e) => onToggle(insurance.id, e.target.checked)}
+        />
+        Accepted
+      </label>
+      <button
+        onClick={() => onRename(insurance.id, value.trim())}
+        className="rounded-md bg-secondary px-3 py-2 text-xs font-medium"
+      >
+        Save
+      </button>
+      <button
+        onClick={() => onRemove(insurance.id, insurance.name)}
+        className="text-xs text-destructive hover:underline"
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+function ContactsTab() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["clinic_contacts"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("clinic_contacts").select("*").order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const save = async (id: string, values: { label: string; phone: string; email: string }) => {
+    const { error } = await supabase.from("clinic_contacts").update(values).eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Contact updated");
+    qc.invalidateQueries({ queryKey: ["clinic_contacts"] });
+  };
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {(data ?? []).map((c) => (
+        <ContactCard key={c.id} contact={c} onSave={save} />
+      ))}
+    </div>
+  );
+}
+
+function MessagesTab({ isAdmin }: { isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["admin_messages"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contact_messages")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const markRead = async (id: string) => {
+    const { error } = await supabase
+      .from("contact_messages")
+      .update({ status: "read", read_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["admin_messages"] });
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from("contact_messages").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["admin_messages"] });
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Messages sent from the “Contact us” form arrive here — nothing is sent by email.
+      </p>
+      {(data ?? []).map((m) => (
+        <div key={m.id} className="rounded-xl border border-border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold">{m.subject}</p>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs ${
+                m.status === "new" ? "bg-accent/20 text-accent-foreground" : "bg-secondary"
+              }`}
+            >
+              {m.status}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            From {m.sender_name}
+            {m.sender_phone ? ` · ${m.sender_phone}` : ""}
+            {m.sender_email ? ` · ${m.sender_email}` : ""} · to {m.to_label ?? "Reception"}
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-sm">{m.message}</p>
+          <div className="mt-2 flex gap-4">
+            {m.status === "new" ? (
+              <button onClick={() => markRead(m.id)} className="text-xs text-primary hover:underline">
+                Mark as read
+              </button>
+            ) : null}
+            {isAdmin ? (
+              <button onClick={() => remove(m.id)} className="text-xs text-destructive hover:underline">
+                Delete
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ))}
+      {(data ?? []).length === 0 ? (
+        <p className="text-sm text-muted-foreground">No messages yet.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ContactCard({
+  contact,
+  onSave,
+}: {
+  contact: { id: string; label: string; phone: string; email: string };
+  onSave: (id: string, v: { label: string; phone: string; email: string }) => void;
+}) {
+  const [label, setLabel] = useState(contact.label);
+  const [phone, setPhone] = useState(contact.phone);
+  const [email, setEmail] = useState(contact.email);
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <Field label="Label" value={label} onChange={setLabel} />
+      <Field label="Phone" value={phone} onChange={setPhone} />
+      <Field label="Email" value={email} onChange={setEmail} type="email" />
+      <button
+        onClick={() => onSave(contact.id, { label, phone, email })}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+      >
+        Save
+      </button>
+    </div>
+  );
+}
+
+function WorkersTab() {
+  const register = useServerFn(createWorker);
+  const fetchWorkers = useServerFn(listWorkers);
+  const removeWorker = useServerFn(deleteWorker);
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    password: "",
+    phone: "",
+    specialty: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const { data: workers } = useQuery({
+    queryKey: ["admin_workers"],
+    queryFn: async () => (await fetchWorkers({ data: undefined })).workers,
+  });
+
+  const onDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete the account of ${name}? This cannot be undone.`)) return;
+    try {
+      await removeWorker({ data: { userId: id } });
+      toast.success("Worker deleted");
+      qc.invalidateQueries({ queryKey: ["admin_workers"] });
+      qc.invalidateQueries({ queryKey: ["staff_members"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete the worker");
+    }
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await register({ data: { ...form, addToTeam: true } });
+      toast.success(`Worker account created for ${form.email}`);
+      setForm({ fullName: "", email: "", password: "", phone: "", specialty: "" });
+      qc.invalidateQueries({ queryKey: ["admin_workers"] });
+      qc.invalidateQueries({ queryKey: ["staff_members"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create the worker");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div>
+      <h2 className="text-lg font-semibold">Register a worker</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Create login credentials for a staff member. They can change their name, phone and password
+        themselves from “My account”.
+      </p>
+      <p className="mt-2 rounded-lg bg-secondary/60 p-3 text-xs text-muted-foreground">
+        Give the worker the work email and temporary password below. They sign in at{" "}
+        <strong>/auth</strong> and land on their own <strong>/dashboard</strong>, where they see
+        their messages and appointments and can change their password.
+      </p>
+      <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-border bg-card p-4">
+        <Field label="Full name" value={form.fullName} onChange={(v) => set("fullName", v)} required />
+        <Field label="Specialty / job title" value={form.specialty} onChange={(v) => set("specialty", v)} required />
+        <Field label="Work email" type="email" value={form.email} onChange={(v) => set("email", v)} required />
+        <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} />
+        <Field
+          label="Temporary password (min. 8 characters)"
+          type="password"
+          value={form.password}
+          onChange={(v) => set("password", v)}
+          required
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {busy ? "Creating…" : "Create worker account"}
+        </button>
+      </form>
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold">Registered workers</h2>
+        <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/60 text-left">
+              <tr>
+                {["Name", "Specialty", "Phone", "Email", "Role", ""].map((h) => (
+                  <th key={h} className="px-3 py-2 font-medium">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(workers ?? []).map((w) => (
+                <tr key={w.id} className="border-t border-border">
+                  <td className="px-3 py-2">{w.fullName || "—"}</td>
+                  <td className="px-3 py-2">{w.specialty || "—"}</td>
+                  <td className="px-3 py-2">{w.phone || "—"}</td>
+                  <td className="px-3 py-2">{w.email}</td>
+                  <td className="px-3 py-2">{w.role}</td>
+                  <td className="px-3 py-2">
+                    {w.role === "admin" ? null : (
+                      <button
+                        onClick={() => onDelete(w.id, w.fullName || w.email)}
+                        className="text-xs text-destructive hover:underline"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {(workers ?? []).length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">No workers registered yet.</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewsTab() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+
+  const { data } = useQuery({
+    queryKey: ["admin_posts"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("posts")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const publish = async () => {
+    if (title.trim().length < 3 || body.trim().length < 5) {
+      toast.error("Add a title and a message");
+      return;
+    }
+    const { error } = await supabase.from("posts").insert({
+      title: title.trim(),
+      body: body.trim(),
+      image_url: imageUrl.trim() || null,
+      author_id: user?.id ?? null,
+    });
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setTitle("");
+    setBody("");
+    setImageUrl("");
+    toast.success("Published");
+    qc.invalidateQueries({ queryKey: ["admin_posts"] });
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from("posts").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["admin_posts"] });
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-lg font-semibold">New post</h2>
+        <Field label="Title" value={title} onChange={setTitle} />
+        <Field label="Image URL (optional)" value={imageUrl} onChange={setImageUrl} />
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">Message</span>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </label>
+        <button
+          onClick={publish}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+        >
+          Publish
+        </button>
+      </div>
+      <div className="space-y-3">
+        {(data ?? []).map((p) => (
+          <div key={p.id} className="rounded-xl border border-border bg-card p-4">
+            <h3 className="font-semibold">{p.title}</h3>
+            <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{p.body}</p>
+            <button onClick={() => remove(p.id)} className="mt-2 text-xs text-destructive hover:underline">
+              Delete
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TeamTab() {
+  const qc = useQueryClient();
+  const [fullName, setFullName] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [phones, setPhones] = useState("");
+
+  const { data } = useQuery({
+    queryKey: ["staff_members"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("staff_members").select("*").order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const add = async () => {
+    if (fullName.trim().length < 2 || specialty.trim().length < 2) {
+      toast.error("Name and specialty are required");
+      return;
+    }
+    const { error } = await supabase.from("staff_members").insert({
+      full_name: fullName.trim(),
+      specialty: specialty.trim(),
+      phones: phones.trim() || null,
+      sort_order: (data?.length ?? 0) + 1,
+    });
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setFullName("");
+    setSpecialty("");
+    setPhones("");
+    qc.invalidateQueries({ queryKey: ["staff_members"] });
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from("staff_members").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["staff_members"] });
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-lg font-semibold">Add a team member</h2>
+        <Field label="Full name" value={fullName} onChange={setFullName} />
+        <Field label="Specialty" value={specialty} onChange={setSpecialty} />
+        <Field label="Phone(s)" value={phones} onChange={setPhones} />
+        <button onClick={add} className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+          Add
+        </button>
+      </div>
+      <div className="space-y-3">
+        {(data ?? []).map((m) => (
+          <div key={m.id} className="rounded-xl border border-border bg-card p-4">
+            <p className="font-semibold">{m.full_name}</p>
+            <p className="text-sm text-muted-foreground">{m.specialty}</p>
+            {m.phones ? <p className="text-sm text-muted-foreground">{m.phones}</p> : null}
+            <button onClick={() => remove(m.id)} className="mt-2 text-xs text-destructive hover:underline">
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab() {
+  const qc = useQueryClient();
+  const sendTest = useServerFn(sendTestNotification);
+  const [email, setEmail] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ["clinic_settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("clinic_settings")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  if (data && !loaded) {
+    setLoaded(true);
+    setEmail(data.notification_email ?? "");
+  }
+
+  const save = async () => {
+    const value = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    const { error } = data
+      ? await supabase.from("clinic_settings").update({ notification_email: value }).eq("id", data.id)
+      : await supabase.from("clinic_settings").insert({ notification_email: value });
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Notification email saved");
+    qc.invalidateQueries({ queryKey: ["clinic_settings"] });
+  };
+
+  return (
+    <div className="max-w-xl space-y-3 rounded-xl border border-border bg-card p-5">
+      <h2 className="text-lg font-semibold">Appointment notifications</h2>
+      <p className="text-sm text-muted-foreground">
+        Every new online booking is emailed to this address with the full patient details and the
+        appointment code.
+      </p>
+      <Field label="Notification email" type="email" value={email} onChange={setEmail} />
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={save}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+        >
+          Save
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const r = await sendTest();
+              if (r.sent) toast.success("Test email sent — check the inbox");
+              else toast.warning(r.error ?? "Test email could not be sent");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not send test email");
+            }
+          }}
+          className="rounded-md border border-border px-4 py-2 text-sm font-semibold"
+        >
+          Send test email
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block font-medium">{label}</span>
+      <input
+        type={type}
+        value={value}
+        required={required}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+      />
+    </label>
+  );
+}
