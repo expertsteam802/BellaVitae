@@ -8,11 +8,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
@@ -40,7 +38,6 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
   return (
@@ -97,11 +94,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
       { name: "twitter:title", content: "Bella Vitae Medical Clinic | bellavitae · bellavitaemedicalclinic" },
       { name: "twitter:description", content: "Bella Vitae Medical Clinic — bellavitae / bellavitaemedicalclinic. General medicine, dentistry, gynecology and internal medicine in Kigali. Open 07:00–23:00 daily. Book online." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/9f63aa31-3356-4890-afa6-1bb4ef960ff8/id-preview-14b86647--a06db4e9-2e49-4bd2-afa6-48ba15c4dc48.lovable.app-1785781717373.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/9f63aa31-3356-4890-afa6-1bb4ef960ff8/id-preview-14b86647--a06db4e9-2e49-4bd2-afa6-48ba15c4dc48.lovable.app-1785781717373.png" },
     ],
     links: [
       {
