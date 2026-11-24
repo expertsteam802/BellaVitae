@@ -2,9 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 function normalizePhone(value: string) {
-  const digits = value.replace(/\\D/g, "");
+  const digits = value.replace(/\D/g, "");
   const national = digits.startsWith("250") ? digits : digits.startsWith("0") ? "250" + digits.slice(1) : "250" + digits;
-  if (!/^2507\\d{8}$/.test(national)) {
+  if (!/^2507\d{8}$/.test(national)) {
     throw new Error("Enter a valid Rwanda mobile number, for example 0788 123 456.");
   }
   return { phone: "+" + national, email: national + "@patients.bellavitae.invalid" };
@@ -16,7 +16,7 @@ export const registerPatientAccount = createServerFn({ method: "POST" })
     fullName: z.string().trim().min(2).max(120),
     phone: z.string().trim().min(9).max(24),
     network: z.enum(["airtel", "mtn"]),
-    pin: z.string().regex(/^\\d{6,12}$/, "PIN must contain 6 to 12 digits."),
+    pin: z.string().regex(/^\d{6,12}$/, "PIN must contain 6 to 12 digits."),
   }).parse(input))
   .handler(async ({ data }) => {
     const { phone, email } = normalizePhone(data.phone);
