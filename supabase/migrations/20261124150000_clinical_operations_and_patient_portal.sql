@@ -277,8 +277,6 @@ ALTER TABLE public.lab_orders ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.lab_orders FROM anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.lab_orders TO authenticated;
 GRANT ALL ON public.lab_orders TO service_role;
-CREATE POLICY "Patients read own lab orders" ON public.lab_orders
-  FOR SELECT TO authenticated USING (patient_id=(select auth.uid()));
 CREATE POLICY "Authorized staff read lab orders" ON public.lab_orders
   FOR SELECT TO authenticated USING (
     public.has_role((select auth.uid()), 'admin')
@@ -442,8 +440,6 @@ ALTER TABLE public.insurance_claims ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.insurance_claims FROM anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.insurance_claims TO authenticated;
 GRANT ALL ON public.insurance_claims TO service_role;
-CREATE POLICY "Patients read own insurance claims" ON public.insurance_claims
-  FOR SELECT TO authenticated USING (patient_id=(select auth.uid()));
 CREATE POLICY "Authorized staff read insurance claims" ON public.insurance_claims
   FOR SELECT TO authenticated USING (
     public.has_role((select auth.uid()), 'admin')
