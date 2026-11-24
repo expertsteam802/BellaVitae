@@ -65,7 +65,7 @@ export const rescheduleAppointment = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) =>
     accessSchema.extend({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      time: z.string().regex(/^([01]\\d|2[0-3]):[0-5]\\d$/),
+      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
     }).parse(data),
   )
   .handler(async ({ data }) => {
