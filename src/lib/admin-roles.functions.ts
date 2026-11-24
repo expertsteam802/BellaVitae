@@ -48,7 +48,7 @@ export const assignAdministrator = createServerFn({ method: "POST" })
     const { error: roleError } = await supabaseAdmin.from("user_roles")
       .insert({ user_id: profile.id, role: "admin" });
     if (roleError) throw new Error("Could not grant administrator access");
-    const { error: auditError } = await supabaseAdmin.from("admin_role_audit").insert({
+    const { error: auditError } = await (supabaseAdmin as any).from("admin_role_audit").insert({
       actor_id: context.userId, target_user_id: profile.id, target_email: profile.email ?? email, action: "granted",
     });
     if (auditError) console.error("Admin role audit insert failed", auditError.message);
@@ -74,7 +74,7 @@ export const revokeAdministrator = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("user_roles").delete()
       .eq("user_id", data.userId).eq("role", "admin");
     if (error) throw new Error("Could not remove administrator access");
-    const { error: auditError } = await supabaseAdmin.from("admin_role_audit").insert({
+    const { error: auditError } = await (supabaseAdmin as any).from("admin_role_audit").insert({
       actor_id: context.userId, target_user_id: data.userId, target_email: profile.email ?? "", action: "revoked",
     });
     if (auditError) console.error("Admin role audit insert failed", auditError.message);
