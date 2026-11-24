@@ -37,8 +37,13 @@ export const createWorker = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     if (created.user) {
-      await supabaseAdmin
-        .from("profiles")
+      const { error: roleError } = await supabaseAdmin.from("user_roles")
+        .insert({ user_id: created.user.id, role: "staff" });
+      if (roleError) {
+        await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+        throw new Error("Could not assign the staff role to this account");
+      }
+      await supabaseAdmin.from("profiles")
         .update({ specialty: data.specialty, phone: data.phone, full_name: data.fullName })
         .eq("id", created.user.id);
     }

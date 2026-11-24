@@ -7,6 +7,7 @@ import { SiteLayout } from "@/components/SiteLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { createWorker } from "@/lib/admin.functions";
+import { listAdministrators, assignAdministrator, revokeAdministrator } from "@/lib/admin-roles.functions";
 import { listWorkers, deleteWorker } from "@/lib/staff.functions";
 import { sendTestNotification } from "@/lib/status.functions";
 
@@ -25,7 +26,7 @@ export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-const TABS = ["Appointments", "Messages", "Contacts", "Insurances", "Workers", "News", "Team", "Settings"] as const;
+const TABS = ["Appointments", "Messages", "Contacts", "Insurances", "Workers", "News", "Team", "Administrators", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 function AdminPage() {
@@ -83,6 +84,7 @@ function AdminPage() {
           {tab === "Workers" && isAdmin ? <WorkersTab /> : null}
           {tab === "News" ? <NewsTab /> : null}
           {tab === "Team" && isAdmin ? <TeamTab /> : null}
+          {tab === "Administrators" && isAdmin ? <AdministratorsTab /> : null}
           {tab === "Settings" && isAdmin ? <SettingsTab /> : null}
         </div>
       </div>
@@ -808,6 +810,79 @@ function SettingsTab() {
         >
           Send test email
         </button>
+      </div>
+    </div>
+  );
+}
+
+
+function AdministratorsTab() {
+  const fetchAdmins = useServerFn(listAdministrators);
+  const assignAdmin = useServerFn(assignAdministrator);
+  const revokeAdmin = useServerFn(revokeAdministrator);
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { data, isLoading } = useQuery({
+    queryKey: ["clinic_administrators"],
+    queryFn: async () => (await fetchAdmins({ data: undefined })).administrators,
+  });
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await assignAdmin({ data: { email: email.trim().toLowerCase() } });
+      toast.success("Administrator access granted");
+      setEmail("");
+      qc.invalidateQueries({ queryKey: ["clinic_administrators"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not assign administrator access");
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (id: string, targetEmail: string) => {
+    if (!window.confirm(`Remove administrator access from ${targetEmail}?`)) return;
+    setBusy(true);
+    try {
+      await revokeAdmin({ data: { userId: id } });
+      toast.success("Administrator access removed");
+      qc.invalidateQueries({ queryKey: ["clinic_administrators"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove administrator access");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <form onSubmit={submit} className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <h2 className="text-lg font-semibold">Assign an administrator</h2>
+        <p className="text-sm text-muted-foreground">
+          Enter the email address of an existing Bella Vitae account. The person must register and sign in at least once before you can grant access.
+        </p>
+        <Field label="Account email" type="email" value={email} onChange={setEmail} required />
+        <button type="submit" disabled={busy || !email.trim()} className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+          {busy ? "Please wait…" : "Grant admin access"}
+        </button>
+      </form>
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold">Administrators</h2>
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading administrators…</p> : null}
+        {(data ?? []).map((admin) => (
+          <div key={admin.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+            <div>
+              <p className="font-semibold">{admin.fullName || admin.email}</p>
+              <p className="text-sm text-muted-foreground">{admin.email}</p>
+              {admin.protected ? <p className="mt-1 text-xs text-primary">Initial clinic administrator</p> : null}
+            </div>
+            {!admin.protected ? (
+              <button type="button" disabled={busy} onClick={() => remove(admin.id, admin.email)} className="text-sm text-destructive hover:underline disabled:opacity-60">
+                Remove access
+              </button>
+            ) : null}
+          </div>
+        ))}
+        {!isLoading && (data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No administrator accounts are registered yet.</p> : null}
       </div>
     </div>
   );
