@@ -1,7 +1,5 @@
 export type SmsResult = { sent: boolean; provider: string; error?: string };
 
-const GATEWAY_URL = "https://connector-gateway.lovable.dev/twilio";
-
 /** Rwandan numbers are often typed as 0788… or 788… — normalise to E.164. */
 export function toE164(raw: string): string {
   const digits = (raw || "").replace(/[^0-9]/g, "");
@@ -21,40 +19,20 @@ function sender() {
   return null;
 }
 
-/**
- * Sends an SMS through the Twilio connector gateway when the Twilio connection
- * is linked, and falls back to direct Twilio API credentials if those are set.
- */
+/** Sends SMS directly through the official Twilio API using server-only credentials. */
 export async function sendSms(to: string, body: string): Promise<SmsResult> {
   const destination = toE164(to);
   if (!destination) return { sent: false, provider: "none", error: "Invalid phone number" };
-
   const fromFields = sender();
-  if (!fromFields) {
-    console.warn("[sms] no sending number configured, message not sent");
-    return { sent: false, provider: "none", error: "No Twilio sending number configured" };
-  }
+  if (!fromFields) return { sent: false, provider: "none", error: "No Twilio sending number configured" };
 
-  const params = new URLSearchParams({ To: destination, Body: body, ...fromFields });
-
-  const lovableKey = process.env["LOVABLE_API_KEY"];
-  const connectionKey = process.env["TWILIO_API_KEY"];
   const sid = process.env["TWILIO_ACCOUNT_SID"];
   const token = process.env["TWILIO_AUTH_TOKEN"];
+  if (!sid || !token) return { sent: false, provider: "none", error: "Twilio credentials are not configured" };
 
-  let res: Response;
-  if (lovableKey && connectionKey) {
-    res = await fetch(`${GATEWAY_URL}/Messages.json`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "X-Connection-Api-Key": connectionKey,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: params,
-    });
-  } else if (sid && token) {
-    res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+  const params = new URLSearchParams({ To: destination, Body: body, ...fromFields });
+  try {
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
@@ -62,28 +40,19 @@ export async function sendSms(to: string, body: string): Promise<SmsResult> {
       },
       body: params,
     });
-  } else {
-    console.warn("[sms] provider not configured, message not sent");
-    return { sent: false, provider: "none", error: "SMS provider not configured" };
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error(`[sms] send failed [${response.status}]: ${detail}`);
+      return { sent: false, provider: "twilio", error: `[${response.status}] ${detail}` };
+    }
+    return { sent: true, provider: "twilio" };
+  } catch (error) {
+    return { sent: false, provider: "twilio", error: error instanceof Error ? error.message : "SMS send failed" };
   }
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`[sms] send failed [${res.status}]: ${text}`);
-    return { sent: false, provider: "twilio", error: `[${res.status}] ${text}` };
-  }
-  return { sent: true, provider: "twilio" };
 }
 
 export function smsConfigured() {
-  const hasSender = Boolean(
-    process.env["TWILIO_FROM_NUMBER"] ??
-      process.env["TWILIO_PHONE_NUMBER"] ??
-      process.env["TWILIO_MESSAGING_SERVICE_SID"],
-  );
-  const hasAuth = Boolean(
-    (process.env["LOVABLE_API_KEY"] && process.env["TWILIO_API_KEY"]) ??
-      (process.env["TWILIO_ACCOUNT_SID"] && process.env["TWILIO_AUTH_TOKEN"]),
-  );
+  const hasSender = Boolean(process.env["TWILIO_FROM_NUMBER"] || process.env["TWILIO_PHONE_NUMBER"] || process.env["TWILIO_MESSAGING_SERVICE_SID"]);
+  const hasAuth = Boolean(process.env["TWILIO_ACCOUNT_SID"] && process.env["TWILIO_AUTH_TOKEN"]);
   return hasSender && hasAuth;
 }
