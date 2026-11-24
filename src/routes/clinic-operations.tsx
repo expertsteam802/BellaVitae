@@ -16,26 +16,7 @@ export const Route = createFileRoute("/clinic-operations")({
   component: ClinicOperationsPage,
 });
 
-const PERMISSIONS = [
-  { key: "patients.read", label: "Patient directory" },
-  { key: "records.read", label: "Read medical records" },
-  { key: "records.write", label: "Write medical records" },
-  { key: "encounters.read", label: "Read consultations" },
-  { key: "encounters.write", label: "Create consultations and visit summaries" },
-  { key: "prescriptions.read", label: "Read prescriptions" },
-  { key: "prescriptions.write", label: "Create prescriptions" },
-  { key: "lab.read", label: "Read laboratory work" },
-  { key: "lab.write", label: "Manage laboratory work" },
-  { key: "billing.read", label: "Read billing" },
-  { key: "billing.write", label: "Create and update invoices" },
-  { key: "claims.read", label: "Read insurance claims" },
-  { key: "claims.write", label: "Manage insurance claims" },
-  { key: "documents.read", label: "Read document metadata" },
-  { key: "documents.write", label: "Register patient documents" },
-  { key: "audit.read", label: "Review audit activity" },
-] as const;
-
-type Permission = (typeof PERMISSIONS)[number]["key"];
+type Permission = "patients.read" | "records.read" | "records.write" | "encounters.read" | "encounters.write" | "prescriptions.read" | "prescriptions.write" | "lab.read" | "lab.write" | "lab.verify" | "billing.read" | "billing.write" | "claims.read" | "claims.write" | "documents.read" | "documents.write" | "audit.read";
 type Tab = "Patients" | "Records" | "Consultations" | "Prescriptions" | "Laboratory" | "Billing" | "Audit";
 
 function ClinicOperationsPage() {
@@ -154,10 +135,6 @@ function ClinicOperationsPage() {
     return !q || [p.full_name, p.email, p.phone].some((v) => String(v ?? "").toLowerCase().includes(q));
   });
   const refresh = (...keys: string[]) => keys.forEach((key) => qc.invalidateQueries({ queryKey: [key] }));
-  const choosePatient = (id: string) => {
-    setSelectedPatient(id);
-    setTab("Patients");
-  };
   const submit = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); }
@@ -202,6 +179,7 @@ function ClinicOperationsPage() {
           {tabs.map((t) => <button key={t.key} onClick={() => setTab(t.key)} className={`rounded-t-md px-3 py-2 text-sm font-medium ${tab === t.key ? "bg-primary text-primary-foreground" : "hover:bg-secondary"}`}>{t.label}</button>)}
         </div>
 
+        {tabs.length > 0 && !tabs.some((t) => t.key === tab) ? <Notice>Select a module from the navigation above to continue.</Notice> : null}
         {tabs.length === 0 ? <div className="mt-8 rounded-xl border border-border bg-card p-6"><h2 className="font-semibold">No clinical permissions assigned</h2><p className="mt-2 text-sm text-muted-foreground">Ask a clinic administrator to grant only the access needed for your job. No patient records are available until access is approved.</p></div> : null}
 
         {tab === "Patients" && can("patients.read") ? (
@@ -353,7 +331,7 @@ function ClinicOperationsPage() {
                 {(labOrdersQuery.data ?? []).length === 0 ? <Notice>No laboratory orders.</Notice> : null}
               </div>
               <div className="space-y-3"><h2 className="text-lg font-semibold">Results awaiting verification / released</h2>
-                {(labResultsQuery.data ?? []).map((r: any) => <article key={r.id} className="rounded-xl border border-border bg-card p-4"><div className="flex justify-between gap-2"><strong>{r.result_summary}</strong><span className="text-xs">{r.is_verified ? "Verified" : "Awaiting verification"}</span></div><p className="mt-2 text-sm">{r.result_value ?? "—"} {r.unit ?? ""} {r.reference_range ? "· Range: " + r.reference_range : ""}</p><p className="break-all text-xs text-muted-foreground">Patient {r.patient_id}</p>{!r.is_verified && can("lab.write") ? <button onClick={() => void submit(async () => { const { error } = await db.from("lab_results").update({ is_verified: true, verified_by: user!.id, verified_at: new Date().toISOString() }).eq("id", r.id); if (error) throw error; toast.success("Result verified and released to the patient portal"); refresh("clinic-lab-results"); })} className="mt-3 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground">Verify and release</button> : null}</article>)}
+                {(labResultsQuery.data ?? []).map((r: any) => <article key={r.id} className="rounded-xl border border-border bg-card p-4"><div className="flex justify-between gap-2"><strong>{r.result_summary}</strong><span className="text-xs">{r.is_verified ? "Verified" : "Awaiting verification"}</span></div><p className="mt-2 text-sm">{r.result_value ?? "—"} {r.unit ?? ""} {r.reference_range ? "· Range: " + r.reference_range : ""}</p><p className="break-all text-xs text-muted-foreground">Patient {r.patient_id}</p>{!r.is_verified && can("lab.verify") ? <button onClick={() => void submit(async () => { const { error } = await db.from("lab_results").update({ is_verified: true, verified_by: user!.id, verified_at: new Date().toISOString() }).eq("id", r.id); if (error) throw error; toast.success("Result verified and released to the patient portal"); refresh("clinic-lab-results"); })} className="mt-3 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground">Verify and release</button> : null}</article>)}
                 {(labResultsQuery.data ?? []).length === 0 ? <Notice>No results recorded.</Notice> : null}
               </div>
             </div>
