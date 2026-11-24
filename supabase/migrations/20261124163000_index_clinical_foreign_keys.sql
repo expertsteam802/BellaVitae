@@ -1,0 +1,25 @@
+-- Cover the foreign keys introduced for the clinical modules.
+CREATE INDEX IF NOT EXISTS clinic_audit_log_actor_id_idx ON public.clinic_audit_log(actor_id);
+CREATE INDEX IF NOT EXISTS clinical_encounters_appointment_id_idx ON public.clinical_encounters(appointment_id);
+CREATE INDEX IF NOT EXISTS diagnoses_patient_id_idx ON public.diagnoses(patient_id);
+CREATE INDEX IF NOT EXISTS diagnoses_recorded_by_idx ON public.diagnoses(recorded_by);
+CREATE INDEX IF NOT EXISTS diagnoses_encounter_patient_idx ON public.diagnoses(encounter_id, patient_id);
+CREATE INDEX IF NOT EXISTS insurance_claims_patient_id_idx ON public.insurance_claims(patient_id);
+CREATE INDEX IF NOT EXISTS insurance_claims_created_by_idx ON public.insurance_claims(created_by);
+CREATE INDEX IF NOT EXISTS insurance_claims_invoice_patient_idx ON public.insurance_claims(invoice_id, patient_id);
+CREATE INDEX IF NOT EXISTS invoice_items_patient_id_idx ON public.invoice_items(patient_id);
+CREATE INDEX IF NOT EXISTS invoice_items_invoice_patient_idx ON public.invoice_items(invoice_id, patient_id);
+CREATE INDEX IF NOT EXISTS invoices_appointment_id_idx ON public.invoices(appointment_id);
+CREATE INDEX IF NOT EXISTS invoices_created_by_idx ON public.invoices(created_by);
+CREATE INDEX IF NOT EXISTS lab_orders_encounter_id_idx ON public.lab_orders(encounter_id);
+CREATE INDEX IF NOT EXISTS lab_orders_ordered_by_idx ON public.lab_orders(ordered_by);
+CREATE INDEX IF NOT EXISTS lab_results_order_patient_idx ON public.lab_results(order_id, patient_id);
+CREATE INDEX IF NOT EXISTS lab_results_verified_by_idx ON public.lab_results(verified_by);
+CREATE INDEX IF NOT EXISTS patient_documents_patient_id_idx ON public.patient_documents(patient_id);
+CREATE INDEX IF NOT EXISTS patient_documents_uploaded_by_idx ON public.patient_documents(uploaded_by);
+CREATE INDEX IF NOT EXISTS patient_medical_records_recorded_by_idx ON public.patient_medical_records(recorded_by);
+CREATE INDEX IF NOT EXISTS patient_visit_summaries_created_by_idx ON public.patient_visit_summaries(created_by);
+CREATE INDEX IF NOT EXISTS patient_visit_summaries_encounter_patient_idx ON public.patient_visit_summaries(encounter_id, patient_id);
+CREATE INDEX IF NOT EXISTS prescriptions_encounter_id_idx ON public.prescriptions(encounter_id);
+CREATE INDEX IF NOT EXISTS prescriptions_prescribed_by_idx ON public.prescriptions(prescribed_by);
+CREATE INDEX IF NOT EXISTS staff_permissions_granted_by_idx ON public.staff_permissions(granted_by);
