@@ -27,19 +27,33 @@ export const getAppointmentStatus = createServerFn({ method: "POST" })
 export const sendTestNotification = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: roles } = await context.supabase
+    // Verify the role with the trusted server-side client. The request-scoped
+    // client may be subject to user_roles RLS and falsely hide an admin role.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: role, error: roleError } = await supabaseAdmin
       .from("user_roles")
-      .select("role")
+      .select("user_id")
       .eq("user_id", context.userId)
-      .eq("role", "admin");
-    if (!roles?.length) throw new Error("Only administrators can send test emails");
-    const { data: settings } = await context.supabase
+      .eq("role", "admin")
+      .maybeSingle();
+    if (roleError) {
+      console.error("Test-email admin check failed", roleError.message);
+      throw new Error("Could not verify administrator permissions. Please try again.");
+    }
+    if (!role) throw new Error("Only administrators can send test emails");
+
+    const { data: settings, error: settingsError } = await supabaseAdmin
       .from("clinic_settings")
       .select("notification_email")
       .limit(1)
       .maybeSingle();
+    if (settingsError) {
+      console.error("Test-email settings lookup failed", settingsError.message);
+      throw new Error("Could not load the clinic notification address.");
+    }
     const to = (settings?.notification_email ?? "").trim();
     if (!to) return { sent: false, error: "No notification email saved yet" };
+
     const { sendEmail, emailConfigured } = await import("@/lib/email.server");
     if (!emailConfigured()) {
       return { sent: false, error: "Email sending is not active yet — the clinic sending domain must be set up first" };
