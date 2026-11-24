@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   CalendarCheck,
@@ -13,8 +14,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { SiteLayout } from "@/components/SiteLayout";
-import { supabase } from "@/integrations/supabase/client";
 import { TIME_SLOTS } from "@/lib/clinic";
+import { lookupAppointment, cancelAppointment, rescheduleAppointment } from "@/lib/appointment-access.functions";
 
 export const Route = createFileRoute("/my-appointments")({
   head: () => ({
@@ -104,6 +105,9 @@ function Detail({
 }
 
 function MyAppointmentsPage() {
+  const lookupBooking = useServerFn(lookupAppointment);
+  const cancelBooking = useServerFn(cancelAppointment);
+  const rescheduleBooking = useServerFn(rescheduleAppointment);
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [appointment, setAppointment] = useState<PatientAppointment | null>(null);
@@ -128,12 +132,9 @@ function MyAppointmentsPage() {
     setAppointment(null);
     setPanel("none");
     try {
-      const { data, error } = await supabase.rpc(
-        "get_appointment_by_code_and_phone" as never,
-        { _code: code.trim().toUpperCase(), _phone: phone.trim() } as never,
-      );
-      if (error) throw error;
-      const row = (data as unknown as PatientAppointment[] | null)?.[0] ?? null;
+      const row = await lookupBooking({
+        data: { code: code.trim().toUpperCase(), phone: phone.trim() },
+      });
       if (!row) {
         toast.error("No appointment matched that code and phone number");
         return;
@@ -152,16 +153,10 @@ function MyAppointmentsPage() {
     if (!appointment) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase.rpc(
-        "cancel_appointment_by_code_and_phone" as never,
-        {
-          _code: appointment.code,
-          _phone: phone.trim(),
-          _reason: reason,
-        } as never,
-      );
-      if (error) throw error;
-      if (data === true) {
+      const cancelled = await cancelBooking({
+        data: { code: appointment.code, phone: phone.trim(), reason },
+      });
+      if (cancelled) {
         toast.success("Appointment cancelled");
         await refreshAppointment();
       } else {
@@ -179,17 +174,10 @@ function MyAppointmentsPage() {
     if (!appointment) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase.rpc(
-        "reschedule_appointment_by_code_and_phone" as never,
-        {
-          _code: appointment.code,
-          _phone: phone.trim(),
-          _date: date,
-          _time: time,
-        } as never,
-      );
-      if (error) throw error;
-      if (data === true) {
+      const rescheduled = await rescheduleBooking({
+        data: { code: appointment.code, phone: phone.trim(), date, time },
+      });
+      if (rescheduled) {
         toast.success("Appointment rescheduled");
         await refreshAppointment();
       } else {
@@ -205,12 +193,10 @@ function MyAppointmentsPage() {
 
   const refreshAppointment = async () => {
     if (!appointment) return;
-    const { data, error } = await supabase.rpc(
-      "get_appointment_by_code_and_phone" as never,
-      { _code: appointment.code, _phone: phone.trim() } as never,
-    );
-    if (error) throw error;
-    setAppointment((data as unknown as PatientAppointment[] | null)?.[0] ?? null);
+    const refreshed = await lookupBooking({
+      data: { code: appointment.code, phone: phone.trim() },
+    });
+    setAppointment(refreshed ?? null);
   };
 
   const today = new Date().toISOString().slice(0, 10);
