@@ -51,8 +51,10 @@ export function SiteLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
+            {user && !isStaff ? <Link to="/portal" className="text-sm font-medium text-primary hover:underline">Patient portal</Link> : null}
             {isStaff ? (
               <>
+                <Link to="/clinic-operations" className="text-sm font-medium text-primary hover:underline">Clinical workspace</Link>
                 <Link to="/dashboard" className="text-sm font-medium text-primary hover:underline">
                   Dashboard
                 </Link>
@@ -105,8 +107,10 @@ export function SiteLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
+            {user && !isStaff ? <Link to="/portal" onClick={() => setOpen(false)} className="py-2 text-sm text-primary">Patient portal</Link> : null}
             {isStaff ? (
               <>
+                <Link to="/clinic-operations" onClick={() => setOpen(false)} className="py-2 text-sm text-primary">Clinical workspace</Link>
                 <Link to="/dashboard" onClick={() => setOpen(false)} className="py-2 text-sm text-primary">
                   Dashboard
                 </Link>
